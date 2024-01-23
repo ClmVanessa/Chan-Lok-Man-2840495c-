@@ -3,14 +3,14 @@
 # By Leif Azzopardi and David Maxwell
 # With assistance from Enzo Roiz (https://github.com/enzoroiz)
 # 
-# Chapter 5 -- Models and Databases
-# Last updated: October 3rd, 2019
+# Chapter 6 -- Models, Templates and Views
+# Last updated: October 15th, 2019
 # Revising Author: David Maxwell
 # 
 
 #
 # In order to run these tests, copy this module to your tango_with_django_project/rango/ directory.
-# Once this is complete, run $ python manage.py test rango.tests_chapter5
+# Once this is complete, run $ python manage.py test rango.tests_chapter6
 # 
 # The tests will then be run, and the output displayed -- do you pass them all?
 # 
@@ -18,248 +18,260 @@
 #
 
 import os
+import re  # We use regular expressions to do more in-depth checks on generated HTML output from views.
 import warnings
 import importlib
 from rango.models import Category, Page
+from populate_rango import populate
 from django.urls import reverse
 from django.test import TestCase
 from django.conf import settings
-from django.contrib.auth.models import User
+from django.db.models.query import QuerySet
 
 FAILURE_HEADER = f"{os.linesep}{os.linesep}{os.linesep}================{os.linesep}TwD TEST FAILURE =({os.linesep}================{os.linesep}"
 FAILURE_FOOTER = f"{os.linesep}"
 
 
-class Chapter5DatabaseConfigurationTests(TestCase):
+class Chapter6PopulationScriptTest(TestCase):
     """
-    Is your database configured as the book states?
-    These tests should pass if you haven't tinkered with the database configuration.
-    N.B. Some of the configuration values we could check are overridden by the testing framework -- so we leave them.
+    A few simple tests to examine whether the population script has been updated to include the requested changes (views for pages).
     """
     def setUp(self):
-        pass
+        populate()
     
-    def does_gitignore_include_database(self, path):
+    def test_page_objects_have_views(self):
         """
-        Takes the path to a .gitignore file, and checks to see whether the db.sqlite3 database is present in that file.
+        Checks the basic requirement that all pages must have a positive view count.
         """
-        f = open(path, 'r')
-        
-        for line in f:
-            line = line.strip()
-            
-            if line.startswith('db.sqlite3'):
-                return True
-        
-        f.close()
-        return False
-    
-    def test_databases_variable_exists(self):
-        """
-        Does the DATABASES settings variable exist, and does it have a default configuration?
-        """
-        self.assertTrue(settings.DATABASES, f"{FAILURE_HEADER}Your project's settings module does not have a DATABASES variable, which is required. Check the start of Chapter 5.{FAILURE_FOOTER}")
-        self.assertTrue('default' in settings.DATABASES, f"{FAILURE_HEADER}You do not have a 'default' database configuration in your project's DATABASES configuration variable. Check the start of Chapter 5.{FAILURE_FOOTER}")
-    
-    def test_gitignore_for_database(self):
-        """
-        If you are using a Git repository and have set up a .gitignore, checks to see whether the database is present in that file.
-        """
-        git_base_dir = os.popen('git rev-parse --show-toplevel').read().strip()
-        
-        if git_base_dir.startswith('fatal'):
-            warnings.warn("You don't appear to be using a Git repository for your codebase. Although not strictly required, it's *highly recommended*. Skipping this test.")
-        else:
-            gitignore_path = os.path.join(git_base_dir, '.gitignore')
-            
-            if os.path.exists(gitignore_path):
-                self.assertTrue(self.does_gitignore_include_database(gitignore_path), f"{FAILURE_HEADER}Your .gitignore file does not include 'db.sqlite3' -- you should exclude the database binary file from all commits to your Git repository.{FAILURE_FOOTER}")
-            else:
-                warnings.warn("You don't appear to have a .gitignore file in place in your repository. We ask that you consider this! Read the Don't git push your Database paragraph in Chapter 5.")
+        pages = Page.objects.filter()
+
+        for page in pages:
+            self.assertTrue(page.views > 0, f"{FAILURE_HEADER}The page '{page.title}' has a negative/zero view count. The exercises for Chapter 6 stated that all view values must be greater than zero. Update your population script, and try again.{FAILURE_FOOTER}")
 
 
-class Chapter5ModelTests(TestCase):
+class Chapter6IndexViewTests(TestCase):
     """
-    Are the models set up correctly, and do all the required attributes (post exercises) exist?
+    A series of tests that examine the behaviour of the index view and its corresponding template.
+    Tests to see if the context dictionary is correctly formed, and whether the response is correct, too.
+    For these tests, we rely on the populate_rango module. We assume that this is now fully correct and working.
+    If tests fail and you can't understand why, maybe it's worth checking out your population script!
+    And yes, we assume that all exercises have been completed, too.
     """
     def setUp(self):
-        category_py = Category.objects.get_or_create(name='Python', views=123, likes=55)
-        Category.objects.get_or_create(name='Django', views=187, likes=90)
-        
-        Page.objects.get_or_create(category=category_py[0],
-                                   title='Tango with Django',
-                                   url='https://www.tangowithdjango.com',
-                                   views=156)
+        populate()
+        self.response = self.client.get(reverse('rango:index'))
+        self.content = self.response.content.decode()
     
-    def test_category_model(self):
+    def test_template_filename(self):
         """
-        Runs a series of tests on the Category model.
-        Do the correct attributes exist?
+        Still using a template?
         """
-        category_py = Category.objects.get(name='Python')
-        self.assertEqual(category_py.views, 123, f"{FAILURE_HEADER}Tests on the Category model failed. Check you have all required attributes (including those specified in the exercises!), and try again.{FAILURE_FOOTER}")
-        self.assertEqual(category_py.likes, 55, f"{FAILURE_HEADER}Tests on the Category model failed. Check you have all required attributes (including those specified in the exercises!), and try again.{FAILURE_FOOTER}")
-        
-        category_dj = Category.objects.get(name='Django')
-        self.assertEqual(category_dj.views, 187, f"{FAILURE_HEADER}Tests on the Category model failed. Check you have all required attributes (including those specified in the exercises!), and try again.{FAILURE_FOOTER}")
-        self.assertEqual(category_dj.likes, 90, f"{FAILURE_HEADER}Tests on the Category model failed. Check you have all required attributes (including those specified in the exercises!), and try again.{FAILURE_FOOTER}")
+        self.assertTemplateUsed(self.response, 'rango/index.html', f"{FAILURE_HEADER}Are you using index.html for your index() view? Why not?!{FAILURE_FOOTER}")
+
+    def test_index_context_dictionary(self):
+        """
+        Runs some assertions to check if the context dictionary has the correct key/value pairings.
+        """
+        expected_boldmessage = 'Crunchy, creamy, cookie, candy, cupcake!'
+        expected_categories_order = list(Category.objects.order_by('-likes')[:5])
+        expected_pages_order = list(Page.objects.order_by('-views')[:5])  # From the exercises section of Chapter 6 -- we cannot assume a set order, because the developer can set the number of views to whatever they wish.
+
+        # Does the boldmessage still exist? A surprising number of people delete it here.
+        self.assertTrue('boldmessage' in self.response.context, f"{FAILURE_HEADER}The 'boldmessage' variable couldn't be found in the context dictionary for the index() view. Did you delete it?{FAILURE_FOOTER}")
+        self.assertEquals(expected_boldmessage, self.response.context['boldmessage'], f"{FAILURE_HEADER}Where did {expected_boldmessage} go in the index() view?{FAILURE_FOOTER}")
+
+        # Check that categories exists in the context dictionary, that it references the correct objects, and the order is spot on.
+        self.assertTrue('categories' in self.response.context, f"{FAILURE_HEADER}We couldn't find a 'categories' variable in the context dictionary within the index() view. Check the instructions in the book, and try again.{FAILURE_FOOTER}")
+        self.assertEqual(type(self.response.context['categories']), QuerySet, f"{FAILURE_HEADER}The 'categories' variable in the context dictionary for the index() view didn't return a QuerySet object as expected.{FAILURE_FOOTER}")
+        self.assertEqual(expected_categories_order, list(self.response.context['categories']), f"{FAILURE_HEADER}Incorrect categories/category order returned from the index() view's context dictionary -- expected {expected_categories_order}; got {list(self.response.context['categories'])}.{FAILURE_FOOTER}")
+
+        # Repeat, but for the pages variable. Note that order cannot be verfified (no instructions in book to use certain values).
+        self.assertTrue('pages' in self.response.context, f"{FAILURE_HEADER}We couldn't find a 'pages' variable in the index() view's context dictionary. Did you complete the Chapter 6 exercises?{FAILURE_FOOTER}")
+        self.assertEqual(type(self.response.context['pages']), QuerySet, f"{FAILURE_HEADER}The 'pages' variable in the index() view's context dictionary doesn't return a QuerySet as expected.{FAILURE_FOOTER}")
+        self.assertEqual(expected_pages_order, list(self.response.context['pages']), f"{FAILURE_HEADER}The 'pages' context dictionary variable for the index() view didn't return the QuerySet we were expectecting: got {list(self.response.context['pages'])}, expected {expected_pages_order}. Did you apply the correct ordering to the filtered results?{FAILURE_FOOTER}")
     
-    def test_page_model(self):
+    def test_index_categories(self):
         """
-        Runs some tests on the Page model.
-        Do the correct attributes exist?
+        Checks the response generated by the index() view -- does it render the categories correctly?
+        Regular expressions are used here (yikes) to try and be as fair as possible when checking the markup received from the developer's project.
         """
-        category_py = Category.objects.get(name='Python')
-        page = Page.objects.get(title='Tango with Django')
-        self.assertEqual(page.url, 'https://www.tangowithdjango.com', f"{FAILURE_HEADER}Tests on the Page model failed. Check you have all required attributes (including those specified in the exercises!), and try again.{FAILURE_FOOTER}")
-        self.assertEqual(page.views, 156, f"{FAILURE_HEADER}Tests on the Page model failed. Check you have all required attributes (including those specified in the exercises!), and try again.{FAILURE_FOOTER}")
-        self.assertEqual(page.title, 'Tango with Django', f"{FAILURE_HEADER}Tests on the Page model failed. Check you have all required attributes (including those specified in the exercises!), and try again.{FAILURE_FOOTER}")
-        self.assertEqual(page.category, category_py, f"{FAILURE_HEADER}Tests on the Page model failed. Check you have all required attributes (including those specified in the exercises!), and try again.{FAILURE_FOOTER}")
+        category_li_entries_regex = [  # 0 = regex match, 1 = title of category, 2 = sanitised markup for error message
+            [r'<li>(\s*|\n*)<a(\s+)href(\s*)=(\s*)("/rango/category/python/"|\'/rango/category/python/\')(\s*)>(\s*|\n*)Python(\s*|\n*)</a>(\s*|\n*)</li>', 'Python', '<li><a href="/rango/category/python/">Python</a></li>'],
+            [r'<li>(\s*|\n*)<a(\s+)href(\s*)=(\s*)("/rango/category/django/"|\'/rango/category/django/\')(\s*)>(\s*|\n*)Django(\s*|\n*)</a>(\s*|\n*)</li>', 'Django', '<li><a href="/rango/category/django/">Django</a></li>'],
+            [r'<li>(\s*|\n*)<a(\s+)href(\s*)=(\s*)("/rango/category/other-frameworks/"|\'/rango/category/other-frameworks/\')(\s*)>(\s*|\n*)Other Frameworks(\s*|\n*)</a>(\s*|\n*)</li>', 'Other Frameworks', '<li><a href="/rango/category/other-frameworks/">Other Frameworks</a></li>'],
+        ]
+
+        # Check for the presence of each entry.
+        for entry in category_li_entries_regex:
+            self.assertTrue(re.search(entry[0], self.content), f"{FAILURE_HEADER}We couldn't find the expected markup '{entry[2]}' (for the {entry[1]} category) in the response of your index() view. Check your template, and try again.{FAILURE_FOOTER}")
     
-    def test_str_method(self):
+    def test_index_pages(self):
         """
-        Tests to see if the correct __str__() method has been implemented for each model.
+        Checks the response generated by the index() view -- does it render the pages correctly?
+        As you can set view values to whatever you like for pages (in the population script), we need to be a bit more clever working out what five of the pages should be displayed.
         """
-        category_py = Category.objects.get(name='Python')
-        page = Page.objects.get(title='Tango with Django')
+        page_li_entries_regex = {
+            'Official Python Tutorial': r'<li>(\s*|\n*)<a(\s+)href(\s*)=(\s*)("http://docs.python.org/3/tutorial/"|\'http://docs.python.org/3/tutorial/\')(\s*)>(\s*|\n*)Official Python Tutorial(\s*|\n*)</a>(\s*|\n*)</li>',
+            'How to Think like a Computer Scientist': r'<li>(\s*|\n*)<a(\s+)href(\s*)=(\s*)("http://www.greenteapress.com/thinkpython/"|\'http://www.greenteapress.com/thinkpython/\')(\s*)>(\s*|\n*)How to Think like a Computer Scientist(\s*|\n*)</a>(\s*|\n*)</li>',
+            'Learn Python in 10 Minutes': r'<li>(\s*|\n*)<a(\s+)href(\s*)=(\s*)("http://www.korokithakis.net/tutorials/python/"|\'http://www.korokithakis.net/tutorials/python/\')(\s*)>(\s*|\n*)Learn Python in 10 Minutes(\s*|\n*)</a>(\s*|\n*)</li>',
+            'Official Django Tutorial': r'<li>(\s*|\n*)<a(\s+)href(\s*)=(\s*)("https://docs.djangoproject.com/en/2.1/intro/tutorial01/"|\'https://docs.djangoproject.com/en/2.1/intro/tutorial01/\')(\s*)>(\s*|\n*)Official Django Tutorial(\s*|\n*)</a>(\s*|\n*)</li>',
+            'Django Rocks': r'<li>(\s*|\n*)<a(\s+)href(\s*)=(\s*)("http://www.djangorocks.com/"|\'http://www.djangorocks.com/\')(\s*)>(\s*|\n*)Django Rocks(\s*|\n*)</a>(\s*|\n*)</li>',
+            'How to Tango with Django': r'<li>(\s*|\n*)<a(\s+)href(\s*)=(\s*)("http://www.tangowithdjango.com/"|\'http://www.tangowithdjango.com/\')(\s*)>(\s*|\n*)How to Tango with Django(\s*|\n*)</a>(\s*|\n*)</li>',
+            'Bottle': r'<li>(\s*|\n*)<a(\s+)href(\s*)=(\s*)("http://bottlepy.org/docs/dev/"|\'http://bottlepy.org/docs/dev/\')(\s*)>(\s*|\n*)Bottle(\s*|\n*)</a>(\s*|\n*)</li>',
+            'Flask': r'<li>(\s*|\n*)<a(\s+)href(\s*)=(\s*)("http://flask.pocoo.org"|\'http://flask.pocoo.org\')(\s*)>(\s*|\n*)Flask(\s*|\n*)</a>(\s*|\n*)</li>',
+        }
+
+        expected_pages_order = list(Page.objects.order_by('-views')[:5])
+        expected_pages_li = []
+
+        # Populate expected_pages_li, picking out the entry from page_li_entries_regex.
+        for expected_page in expected_pages_order:
+            expected_pages_li.append(page_li_entries_regex[expected_page.title])
         
-        self.assertEqual(str(category_py), 'Python', f"{FAILURE_HEADER}The __str__() method in the Category class has not been implemented according to the specification given in the book.{FAILURE_FOOTER}")
-        self.assertEqual(str(page), 'Tango with Django', f"{FAILURE_HEADER}The __str__() method in the Page class has not been implemented according to the specification given in the book.{FAILURE_FOOTER}")
+        # Now we have the five entries regex to match, we can loop over and check each one exists.
+        for expected_regex in expected_pages_li:
+            print(self.content)
+            self.assertTrue(re.search(expected_regex, self.content), f"{FAILURE_HEADER}Checks for the top five pages in the index() view's response failed. Check you are using the correct list of objects, the correct HTML markup, and try again. '{expected_regex}'{FAILURE_FOOTER}")
+        
+    def test_index_response_titles(self):
+        """
+        Checks whether the correct titles are used (including <h2> tags) for categories and pages.
+        This is listed as an exercise at the end of Chapter 6.
+        """
+        expected_category_h2 = '<h2>Most Liked Categories</h2>'
+        expected_page_h2 = '<h2>Most Viewed Pages</h2>'
+
+        self.assertIn(expected_category_h2, self.content, f"{FAILURE_HEADER}We couldn't find the markup '{expected_category_h2}' in your index.html template. Check you completed the Chapter 6 exercises as requested, and try again.{FAILURE_FOOTER}")
+        self.assertIn(expected_page_h2, self.content, f"{FAILURE_HEADER}We couldn't find the markup '{expected_page_h2}' in your index.html template. Check you completed the Chapter 6 exercises as requested, and try again.{FAILURE_FOOTER}")
 
 
-class Chapter5AdminInterfaceTests(TestCase):
+class Chapter6NoItemsIndexViewTests(TestCase):
     """
-    A series of tests that examines the authentication functionality (for superuser creation and logging in), and admin interface changes.
-    Have all the admin interface tweaks been applied, and have the two models been added to the admin app?
-    """
-    def setUp(self):
-        """
-        Create a superuser account for use in testing.
-        Logs the superuser in, too!
-        """
-        User.objects.create_superuser('testAdmin', 'email@email.com', 'adminPassword123')
-        self.client.login(username='testAdmin', password='adminPassword123')
-        
-        category = Category.objects.get_or_create(name='TestCategory')[0]
-        Page.objects.get_or_create(title='TestPage1', url='https://www.google.com', category=category)
-    
-    def test_admin_interface_accessible(self):
-        response = self.client.get('/admin/')
-        self.assertEqual(response.status_code, 200, f"{FAILURE_HEADER}The admin interface is not accessible. Check that you didn't delete the 'admin/' URL pattern in your project's urls.py module.{FAILURE_FOOTER}")
-    
-    def test_models_present(self):
-        """
-        Checks whether the two models are present within the admin interface homepage -- and whether Rango is listed there at all.
-        """
-        response = self.client.get('/admin/')
-        response_body = response.content.decode()
-        
-        # Is the Rango app present in the admin interface's homepage?
-        self.assertTrue('Models in the Rango application' in response_body, f"{FAILURE_HEADER}The Rango app wasn't listed on the admin interface's homepage. You haven't added the models to the admin interface.{FAILURE_FOOTER}")
-        
-        # Check each model is present.
-        self.assertTrue('Categories' in response_body, f"{FAILURE_HEADER}The Category model was not found in the admin interface. If you did add the model to admin.py, did you add the correct plural spelling (Categories)?{FAILURE_FOOTER}")
-        self.assertTrue('Pages' in response_body, f"{FAILURE_HEADER}The Page model was not found in the admin interface. If you did add the model to admin.py, did you add the correct plural spelling (Pages)?{FAILURE_FOOTER}")
-    
-    def test_page_display_changes(self):
-        """
-        Checks to see whether the Page model has had the required changes applied for presentation in the admin interface.
-        """
-        response = self.client.get('/admin/rango/page/')
-        response_body = response.content.decode()
-        
-        # Headers -- are they all present?
-        self.assertTrue('<div class="text"><a href="?o=1">Title</a></div>' in response_body, f"{FAILURE_HEADER}The 'Title' column could not be found in the admin interface for the Page model -- if it is present, is it in the correct order?{FAILURE_FOOTER}")
-        self.assertTrue('<div class="text"><a href="?o=2">Category</a></div>' in response_body, f"{FAILURE_HEADER}The 'Category' column could not be found in the admin interface for the Page model -- if it is present, is it in the correct order?{FAILURE_FOOTER}")
-        self.assertTrue('<div class="text"><a href="?o=3">Url</a></div>' in response_body, f"{FAILURE_HEADER}The 'Url' (stylised that way!) column could not be found in the admin interface for the Page model -- if it is present, is it in the correct order?{FAILURE_FOOTER}")
-        
-        # Is the TestPage1 page present, and in order?
-        expected_str = '<tr class="row1"><td class="action-checkbox"><input type="checkbox" name="_selected_action" value="1" class="action-select"></td><th class="field-title"><a href="/admin/rango/page/1/change/">TestPage1</a></th><td class="field-category nowrap">TestCategory</td><td class="field-url">https://www.google.com</td></tr>'
-        self.assertTrue(expected_str in response_body, f"{FAILURE_HEADER}We couldn't find the correct output in the Page view within the admin interface for page listings. Did you complete the exercises, adding extra columns to the admin view for this model? Are the columns in the correct order?{FAILURE_FOOTER}")
-
-
-class Chapter5PopulationScriptTests(TestCase):
-    """
-    Tests whether the population script puts the expected data into a test database.
-    All values that are explicitly mentioned in the book are tested.
-    Expects that the population script has the populate() function, as per the book!
+    A few tests to complement the Chapter6IndexViewTests.
+    This time, we purposefully do not prepopulate the sample database with data from populate_rango.
+    As such, these tests examine whether the app being tested produces the correct output when no categories/pages are present.
     """
     def setUp(self):
+        self.response = self.client.get(reverse('rango:index'))
+        self.content = self.response.content.decode()
+
+    def test_empty_index_context_dictionary(self):
         """
-        Imports and runs the population script, calling the populate() method.
+        Runs assertions on the context dictionary, ensuring the categories and pages variables exist, but return empty (zero-length) QuerySet objects.
         """
-        try:
-            import populate_rango
-        except ImportError:
-            raise ImportError(f"{FAILURE_HEADER}The Chapter 5 tests could not import the populate_rango. Check it's in the right location (the first tango_with_django_project directory).{FAILURE_FOOTER}")
-        
-        if 'populate' not in dir(populate_rango):
-            raise NameError(f"{FAILURE_HEADER}The populate() function does not exist in the populate_rango module. This is required.{FAILURE_FOOTER}")
-        
-        # Call the population script -- any exceptions raised here do not have fancy error messages to help readers.
-        populate_rango.populate()
+        self.assertTrue('categories' in self.response.context, f"{FAILURE_HEADER}The 'categories' variable does not exist in the context dictionary for index(). (Empty check){FAILURE_FOOTER}")
+        self.assertEqual(type(self.response.context['categories']), QuerySet, f"{FAILURE_HEADER}The 'categories' variable in the context dictionary for index() does yield a QuerySet object. (Empty check){FAILURE_FOOTER}")
+        self.assertEqual(len(self.response.context['categories']), 0, f"{FAILURE_HEADER}The 'categories' variable in the context dictionary for index() is not empty. (Empty check){FAILURE_FOOTER}")
+
+        self.assertTrue('pages' in self.response.context, f"{FAILURE_HEADER}The 'pages' variable does not exist in the context dictionary for index(). (Empty check){FAILURE_FOOTER}")
+        self.assertEqual(type(self.response.context['pages']), QuerySet, f"{FAILURE_HEADER}The 'pages' variable in the context dictionary for index() does yield a QuerySet object. (Empty check){FAILURE_FOOTER}")
+        self.assertEqual(len(self.response.context['pages']), 0, f"{FAILURE_HEADER}The 'pages' variable in the context dictionary for index() is not empty. (Empty check){FAILURE_FOOTER}")
     
-    def test_categories(self):
+    def test_empty_index_response(self):
         """
-        There should be three categories from populate_rango -- Python, Django and Other Frameworks.
+        Checks to see whether the correct messages appear for no categories and pages.
         """
-        categories = Category.objects.filter()
-        categories_len = len(categories)
-        categories_strs = map(str, categories)
-        
-        self.assertEqual(categories_len, 3, f"{FAILURE_HEADER}Expecting 3 categories to be created from the populate_rango module; found {categories_len}.{FAILURE_FOOTER}")
-        self.assertTrue('Python' in categories_strs, f"{FAILURE_HEADER}The category 'Python' was expected but not created by populate_rango.{FAILURE_FOOTER}")
-        self.assertTrue('Django' in categories_strs, f"{FAILURE_HEADER}The category 'Django' was expected but not created by populate_rango.{FAILURE_FOOTER}")
-        self.assertTrue('Other Frameworks' in categories_strs, f"{FAILURE_HEADER}The category 'Other Frameworks' was expected but not created by populate_rango.{FAILURE_FOOTER}")
+        self.assertIn('<strong>There are no categories present.</strong>', self.content, f"{FAILURE_HEADER}When no categories are present, we can't find the required '<strong>There are no categories present.</strong>' markup in your index() view's output.{FAILURE_FOOTER}")
+        self.assertIn('<strong>There are no pages present.</strong>', self.content, f"{FAILURE_HEADER}When no categories are present, we can't find the required '<strong>There are no pages present.</strong>' markup in your index() view's output. Read the Chapter 6 exercises carefully.{FAILURE_FOOTER}")
     
-    def test_pages(self):
+    def test_sample_category(self):
         """
-        Tests to check whether each page for the three different categories exists in the database.
-        Calls the helper check_category_pages() method for this.
+        Checks to see if the correct output is displayed when a sample Category object is added.
+        For this test, we disregard the instance variable response.
         """
-        details = {'Python':
-                       ['Official Python Tutorial', 'How to Think like a Computer Scientist', 'Learn Python in 10 Minutes'],
-                   'Django':
-                       ['Official Django Tutorial', 'Django Rocks', 'How to Tango with Django'],
-                   'Other Frameworks':
-                       ['Bottle', 'Flask']}
-        
-        for category in details:
-            page_titles = details[category]
-            self.check_category_pages(category, page_titles)
+        Category.objects.get_or_create(name='Test Category')
+        updated_response = self.client.get(reverse('rango:index')).content.decode()
+
+        category_regex = r'<li>(\s*|\n*)<a(\s+)href(\s*)=(\s*)("/rango/category/test-category/"|\'/rango/category/test-category/\')(\s*)>(\s*|\n*)Test Category(\s*|\n*)</a>(\s*|\n*)</li>'
+        self.assertTrue(re.search(category_regex, updated_response), f"{FAILURE_HEADER}When adding a test category, we couldn't find the markup for it in the output of the index() view. Check you have included all the code correctly for displaying categories.{FAILURE_FOOTER}")
+        self.assertIn('<strong>There are no pages present.</strong>', self.content, f"{FAILURE_HEADER}When no categories are present, we can't find the required '<strong>There are no pages present.</strong>' markup in your index() view's output. Read the Chapter 6 exercises carefully.{FAILURE_FOOTER}")
+
+class Chapter6CategoryViewTests(TestCase):
+    """
+    A series of tests for examining the show_category() view, looking at the context dictionary and rendered response.
+    We use the 'Other Frameworks' category for these tests to check the slugs work correctly, too.
+    """
+    def setUp(self):
+        populate()
+        self.response = self.client.get(reverse('rango:show_category', kwargs={'category_name_slug': 'other-frameworks'}))
+        self.content = self.response.content.decode()
     
-    def test_counts(self):
+    def test_template_filename(self):
         """
-        Tests whether each category's likes and views values are the values that are stated in the book.
-        Pukes when a value doesn't match.
+        Still using a template?
         """
-        details = {'Python': {'views': 128, 'likes': 64},
-                   'Django': {'views': 64, 'likes': 32},
-                   'Other Frameworks': {'views': 32, 'likes': 16}}
-        
-        for category in details:
-            values = details[category]
-            category = Category.objects.get(name=category)
-            self.assertEqual(category.views, values['views'], f"{FAILURE_HEADER}The number of views for the '{category}' category is incorrect (got {category.views}, expected {values['views']}, generated from populate_rango).{FAILURE_FOOTER}")
-            self.assertEqual(category.likes, values['likes'], f"{FAILURE_HEADER}The number of likes for the '{category}' category is incorrect (got {category.likes}, expected {values['likes']}, generated from populate_rango).{FAILURE_FOOTER}")
+        self.assertTemplateUsed(self.response, 'rango/category.html', f"{FAILURE_HEADER}The category.html template is not used for the show_category() view. The specification requires this.{FAILURE_FOOTER}")
     
-    def check_category_pages(self, category, page_titles):
+    def test_slug_functionality(self):
         """
-        Performs a number of tests on the database regarding pages for a given category.
-        Do all the included pages in the population script exist?
-        The expected page list is passed as page_titles. The name of the category is passed as category.
+        Runs a simple test by changing the name of the "Other Frameworks" category to "Unscrupulous Nonsense".
+        Checks to see whether the slug updates with the name change.
         """
-        category = Category.objects.get(name=category)
-        pages = Page.objects.filter(category=category)
-        pages_len = len(pages)
-        page_titles_len = len(page_titles)
+        category = Category.objects.get_or_create(name='Other Frameworks')[0]
+        category.name = "Unscrupulous Nonsense"
+        category.save()
+
+        self.assertEquals('unscrupulous-nonsense', category.slug, f"{FAILURE_HEADER}When changing the name of a category, the slug attribute was not updated (correctly) to reflect this change. Did you override the save() method in the Category model correctly?{FAILURE_FOOTER}")
+
+    def test_context_dictionary(self):
+        """
+        Given the response, does the context dictionary match up with what is expected?
+        Is the category object being passed correctly, and are the pages being filtered correctly?
+        """
+        other_frameworks_category = Category.objects.get_or_create(name='Other Frameworks')[0]
+        page_list = list(Page.objects.filter(category=other_frameworks_category))
         
-        self.assertEqual(pages_len, len(page_titles), f"{FAILURE_HEADER}Expected {page_titles_len} pages in the Python category produced by populate_rango; found {pages_len}.{FAILURE_FOOTER}")
-        
-        for title in page_titles:
-            try:
-                page = Page.objects.get(title=title)
-            except Page.DoesNotExist:
-                raise ValueError(f"{FAILURE_HEADER}The page '{title}' belonging to category '{category}' was not found in the database produced by populate_rango.{FAILURE_FOOTER}")
-            
-            self.assertEqual(page.category, category)
+        self.assertTrue('category' in self.response.context, f"{FAILURE_HEADER}The 'category' variable in the context dictionary for the show_category() view was not found. Did you spell it correctly?{FAILURE_FOOTER}")
+        self.assertTrue('pages' in self.response.context, f"{FAILURE_HEADER}The 'pages' variable in the context dictionary for the show_category() view was not found.{FAILURE_FOOTER}")
+
+        self.assertEqual(self.response.context['category'], other_frameworks_category, f"{FAILURE_HEADER}The category returned in the context dictionary for the show_category() view did not match what was expected. We expect to see a Category object returned here (specifically the 'Other Frameworks' category, for our tests).{FAILURE_FOOTER}")
+        self.assertEqual(list(self.response.context['pages']), page_list, f"{FAILURE_HEADER}The list of pages returned in the context dictionary of the show_category() view was not correct. Did you filter the pages correctly in your view?{FAILURE_FOOTER}")
+    
+    def test_response_markup(self):
+        """
+        Some simple tests to make sure the markup returned is on track. Specifically, we look at the title and list of pages returned.
+        """
+        expected_header = '<h1>Other Frameworks</h1>'
+        bottle_markup = r'<li>(\s*|\n*)<a(\s+)href(\s*)=(\s*)("http://bottlepy.org/docs/dev/"|\'http://bottlepy.org/docs/dev/\')(\s*)>(\s*|\n*)Bottle(\s*|\n*)</a>(\s*|\n*)</li>'
+        flask_markup = r'<li>(\s*|\n*)<a(\s+)href(\s*)=(\s*)("http://flask.pocoo.org"|\'http://flask.pocoo.org\')(\s*)>(\s*|\n*)Flask(\s*|\n*)</a>(\s*|\n*)</li>'
+
+        self.assertIn(expected_header, self.content, f"{FAILURE_HEADER}The header tag '{expected_header}' was not found in the response for the show_category() view. Make sure the category.html template matches the specification.{FAILURE_FOOTER}")
+        self.assertTrue(re.search(bottle_markup, self.content), f"{FAILURE_HEADER}Correctly formed <li> markup was not found for the pages to be displayed in the show_category() view. Make sure your category.html template is well-formed!{FAILURE_FOOTER}")
+        self.assertTrue(re.search(flask_markup, self.content), f"{FAILURE_HEADER}Correctly formed <li> markup was not found for the pages to be displayed in the show_category() view. Make sure your category.html template is well-formed!{FAILURE_FOOTER}")
+
+    def test_for_homepage_link(self):
+        """
+        Checks to see if a hyperlink to the homepage is present.
+        We didn't enforce a strict label for the link; we are more interested here in correct syntax.
+        """
+        homepage_hyperlink_markup = r'<a(\s+)href="/rango/">(\w+)</a>'
+        self.assertTrue(re.search(homepage_hyperlink_markup, self.content), f"{FAILURE_HEADER}We couldn't find a well-formed hyperlink to the Rango homepage in your category.html template. This is an exercise at the end of Chapter 6.{FAILURE_FOOTER}")
+
+class Chapter6BadCategoryViewTests(TestCase):
+    """
+    A few tests to examine some edge cases where categories do not exist, for example.
+    """
+    def test_malformed_url(self):
+        """
+        Tests to see whether the URL patterns have been correctly entered; many students have fallen over at this one.
+        Somehow.
+        """
+        response = self.client.get('/rango/category/')
+        self.assertTrue(response.status_code == 404, f"{FAILURE_HEADER}The URL /rango/category/ should return a status of code of 404 (not found). Check to see whether you have correctly entered your urlpatterns.{FAILURE_FOOTER}")
+
+    def test_nonexistent_category(self):
+        """
+        Attempts to lookup a category that does not exist in the database and checks the response.
+        """
+        response = self.client.get(reverse('rango:show_category', kwargs={'category_name_slug': 'nonexistent-category'}))
+        lookup_string = 'The specified category does not exist.'
+        self.assertIn(lookup_string, response.content.decode(), r"{FAILURE_HEADER}The expected message when attempting to access a non-existent category was not found. Check your category.html template.{FAILURE_FOOTER}")
+    
+    def test_empty_category(self):
+        """
+        Adds a Category without pages; checks to see what the response is.
+        """
+        category = Category.objects.get_or_create(name='Test Category')
+        response = self.client.get(reverse('rango:show_category', kwargs={'category_name_slug': 'test-category'}))
+        lookup_string = '<strong>No pages currently in category.</strong>'
+        self.assertIn(lookup_string, response.content.decode(), r"{FAILURE_HEADER}The expected message when accessing a category without pages was not found. Check your category.html template.{FAILURE_FOOTER}")
